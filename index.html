@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fjernkort</title>
+<style>
+  :root { --bg:#120810; --ink:#f6e8ef; --accent:#e23d6b; --soft:#ffb4c8; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at top, #3a1428, var(--bg) 58%);
+    color:var(--ink); font-family:Georgia, "Times New Roman", serif;
+  }
+  .wrap { width:min(480px, 96vw); text-align:center; padding:1rem 0 2rem; }
+  h1 { font-weight:normal; letter-spacing:.14em; font-size:1.05rem; margin:0 0 .25rem; text-transform:uppercase; }
+  .sub { color:var(--soft); font-size:.82rem; margin-bottom:.8rem; }
+  input, select {
+    width:100%; max-width:280px; margin:.25rem auto; display:block;
+    background:#2a1220; color:var(--ink); border:1px solid #7a3a52; border-radius:999px;
+    padding:.7rem 1rem; font-size:1rem; text-align:center;
+  }
+  .modes { display:flex; gap:.35rem; justify-content:center; flex-wrap:wrap; margin:.7rem 0 .9rem; }
+  .modes button { padding:.4rem .6rem; font-size:.75rem; }
+  .modes button.on { outline:2px solid var(--soft); }
+  .deck { height:320px; border-radius:18px; position:relative; perspective:900px; margin-bottom:1rem; }
+  .card {
+    position:absolute; inset:0; border-radius:18px; display:flex; align-items:center; justify-content:center;
+    padding:1.45rem; backface-visibility:hidden; transition:transform .55s ease;
+    box-shadow:0 18px 40px rgba(0,0,0,.35);
+  }
+  .back {
+    background:repeating-linear-gradient(135deg, #6b1d3a 0 12px, #4a1228 12px 24px);
+    border:1px solid #ff7aa2;
+  }
+  .back span { letter-spacing:.18em; text-transform:uppercase; font-size:.88rem; }
+  .front {
+    background:linear-gradient(180deg, #3a1528, #1c0c16);
+    border:1px solid #e23d6b; transform:rotateY(180deg); flex-direction:column; gap:.65rem;
+  }
+  .deck.show .back { transform:rotateY(180deg); }
+  .deck.show .front { transform:rotateY(0deg); }
+  .tag { font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); }
+  .text { font-size:1.14rem; line-height:1.38; }
+  .who { font-size:.78rem; color:var(--soft); }
+  button {
+    background:var(--accent); color:white; border:0; border-radius:999px; padding:.82rem 1.3rem;
+    font-size:1rem; cursor:pointer; margin:.22rem;
+  }
+  button.ghost { background:transparent; color:var(--soft); border:1px solid #7a3a52; }
+  button:disabled { opacity:.45; }
+  .meta, .log { margin-top:.7rem; color:#c9a0b0; font-size:.8rem; }
+  .log { text-align:left; max-width:420px; margin:1rem auto 0; }
+  .log div { padding:.28rem 0; border-bottom:1px solid #3a2030; }
+  .note { margin-top:.85rem; font-size:.74rem; color:#a88896; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Fjernkort</h1>
+    <div class="sub">Samme rumkode på begge telefoner. I ser det samme kort.</div>
+    <div id="login">
+      <input id="name" placeholder="Dit navn" maxlength="20">
+      <input id="room" placeholder="Rumkode, f.eks. nat-42" maxlength="24">
+      <button id="join">Åbn rum</button>
+      <div class="note">Send filen til den anden. I skal begge have net.</div>
+    </div>
+    <div id="game" class="hidden">
+      <div class="modes">
+        <button class="ghost on" data-mode="alle">Alle</button>
+        <button class="ghost" data-mode="bloed">Blød</button>
+        <button class="ghost" data-mode="kink">Kink</button>
+        <button class="ghost" data-mode="sandhed">Sandhed</button>
+        <button class="ghost" data-mode="par">Par</button>
+        <button class="ghost" data-mode="ude">Ude</button>
+        <button class="ghost" data-mode="senere">Senere</button>
+        <button class="ghost" data-mode="flere">Flere</button>
+      </div>
+      <div class="deck" id="deck">
+        <div class="card back"><span>Træk et kort</span></div>
+        <div class="card front">
+          <div class="tag" id="tag">—</div>
+          <div class="text" id="text">Venter</div>
+          <div class="who" id="who"></div>
+        </div>
+      </div>
+      <button id="draw">Træk kort</button>
+      <button class="ghost" id="copy">Del kode</button>
+      <div class="meta" id="meta"></div>
+      <div class="log" id="log"></div>
+      <div class="note">Nej er nej. Rummet er kun så hemmeligt som koden.</div>
+    </div>
+  </div>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+const bloed = [
+  ["Blød","Kys halsen i 20 sekunder, næste gang I ses."],
+  ["Blød","Send et kys-emoji og sig hvor det skulle have landet."],
+  ["Blød","Beskriv et kys, du vil have i aften."],
+  ["Blød","Tag et billede af det tøj, du har på nu."],
+  ["Blød","Hvisk den frækkeste tanke i en stemmebesked."],
+  ["Blød","Vælg ét stykke tøj, den anden skal tage af senere."],
+  ["Blød","Skriv hvor du vil røres først."],
+  ["Blød","Hold telefonen mod halsen og send lyden af et kys."],
+  ["Blød","Beskriv det tøj, du helst ser dem uden."],
+  ["Blød","Send et spejlbillede, kun kraveben og mund."]
+];
+const kink = [
+  ["Kink","Skriv en ordre. Den anden svarer “ja” og gør det, når I er alene."],
+  ["Kink","Vælg noget I kan binde med næste gang. Send et billede af det."],
+  ["Kink","Du må ikke røre dig selv, før den anden siger til."],
+  ["Kink","Beskriv 10 slag. Tæl dem i en besked, når det er gjort."],
+  ["Kink","Sig “må jeg?” før næste frække besked."],
+  ["Kink","Edging i aften: stop to gange, og skriv når du stopper."],
+  ["Kink","“Ja, sir/frue” i de næste tre beskeder."],
+  ["Kink","Vælg en stilling til næste gang. Den anden må ikke ændre den."],
+  ["Kink","En zone er forbudt i aften. Skriv hvilken."],
+  ["Kink","Send en ordre på præcis 8 ord."]
+];
+const sandhed = [
+  ["Sandhed","Hvad er det frækkeste, du har tænkt på i dag?"],
+  ["Sandhed","Hvor vil du helst kysses, som ingen spørger om?"],
+  ["Sandhed","Hvilken fantasi har du ikke sagt højt endnu?"],
+  ["Sandhed","Hvad tænder dig mere: at bestemme eller at adlyde?"],
+  ["Sandhed","Hvad er et ja, du stadig er lidt nervøs for?"],
+  ["Sandhed","Hvad har du lyst til, men ikke bedt om?"],
+  ["Sandhed","Hvilken lyd vil du gerne høre mere af?"],
+  ["Sandhed","Hvis I havde 10 minutter uden afbrydelse, hvad så?"],
+  ["Sandhed","Hvad må den anden aldrig gøre?"],
+  ["Sandhed","Hvilket ord vil du høre, mens det sker?"]
+];
+const par = [
+  ["Par","Skriv præcis hvor du vil have tungen, næste gang."],
+  ["Par","Beskriv hvordan du vil sidde overskrævs."],
+  ["Par","Send en sætning, der starter med “jeg vil have dig til”."],
+  ["Par","Vælg: mund, hænder eller skød. Den anden siger ja eller nej."],
+  ["Par","Fortæl hvordan du vil blive taget, i tre linjer."],
+  ["Par","Aftal 5 minutter i aften, hvor kun den ene bestemmer."],
+  ["Par","Sig hvad du har på under tøjet. Eller at du ikke har noget."],
+  ["Par","Planlæg de første 2 minutter, når I låser døren."],
+  ["Par","En af jer må ikke komme i aften. Trækkeren vælger hvem."],
+  ["Par","Beskriv et kys med hår grebet i hånden."]
+];
+const ude = [
+  ["Ude","Hånd på låret under bordet, indtil tjeneren er gået."],
+  ["Ude","Hvisk én fræk sætning, mens I står i kø."],
+  ["Ude","Intet undertøj resten af turen. Skriv det kun her."],
+  ["Ude","Kys i en elevator, kun indtil døren åbner."],
+  ["Ude","Send en besked fra toilettet: hvad du vil, når I er hjemme."],
+  ["Ude","Foden mod deres ben under bordet i to minutter."],
+  ["Ude","Vælg et kodeord. Når det siges, skylder I et kys ved næste hjørne."],
+  ["Ude","Gå én gade med hånden inden for jakken."],
+  ["Ude · Konsekvens","Sagde du nej: send et billede fra toilettet, kun til den anden."],
+  ["Ude · Konsekvens","Glemte du kodeordet: kys på næste hjørne, 10 sekunder."],
+  ["Ude · Konsekvens","Tabte du kortet: intet undertøj resten af aftenen."],
+  ["Ude · Konsekvens","Brød du reglen: den anden vælger ét tøjstykke, du tager af i taxaen."]
+];
+const senere = [
+  ["Senere","Send en fræk besked kl. 21, uden forklaring."],
+  ["Senere","Gå i seng uden undertøj. Skriv det først, når lyset er slukket."],
+  ["Senere","Den anden vælger, hvad du har på under tøjet i aften."],
+  ["Senere","Skriv tre ting du vil gøres ved dig."],
+  ["Senere","Tag et billede kun til den anden. Send det i morgen formiddag."],
+  ["Senere","Ingen orgasme før næste gang I ses."],
+  ["Senere","Stemmebesked: én sætning du ikke tør sige højt."],
+  ["Senere","Book næste gang I er alene, før I lægger på."],
+  ["Senere","I morgen tidlig: “jeg tænkte på dig” plus hvor."],
+  ["Senere","Gem kortet. Det gælder først, når døren er låst."]
+];
+const flere = [
+  ["Flere","Vælg én fra rummet, der skal kysse dig i 20 sekunder næste gang."],
+  ["Flere","Skriv navnet på den, du vil have i skødet."],
+  ["Flere","Sandhed til begge: den frækkeste ting med mere end én."],
+  ["Flere","Peg på én, der bestemmer næste kys."],
+  ["Flere","Aftal et nej for i aften, så de andre kender det."],
+  ["Flere","Vælg én der giver ordre, og én der udfører, næste gang I er tre."],
+  ["Flere","Beskriv et kys fra to personer samtidig."],
+  ["Flere","Book næste gang mindst tre ses."]
+];
+const decks = { bloed, kink, sandhed, par, ude, senere, flere };
+let mode = "alle", room = "", me = "", client = null, pile = [], seen = new Set(), players = new Set();
+const $ = id => document.getElementById(id);
+function hash(s){ let h = 2166136261; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed){ let a = seed || 1; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function shuffle(list, seed){
+  const b = list.slice(), r = rng(seed);
+  for (let i=b.length-1;i>0;i--){ const j = Math.floor(r()*(i+1)); [b[i],b[j]] = [b[j],b[i]]; }
+  return b;
+}
+function source(){ return mode==="alle" ? Object.values(decks).flat() : decks[mode]; }
+function rebuild(){ pile = shuffle(source(), hash(room + "|" + mode)); seen.clear(); $("meta").textContent = pile.length + " kort · rum " + room; }
+function topic(){ return "fraekke-kort/" + room.replace(/[^a-z0-9\-]/gi,"").toLowerCase(); }
+function show(card, by){
+  $("tag").textContent = card[0];
+  $("text").textContent = card[1];
+  $("who").textContent = by === me ? "Dit træk" : "Trukket af " + by;
+  const deck = $("deck");
+  deck.classList.remove("show");
+  void deck.offsetWidth;
+  deck.classList.add("show");
+}
+function log(line){
+  const d = document.createElement("div");
+  d.textContent = line;
+  $("log").prepend(d);
+}
+function publish(obj){ if(client) client.publish(topic(), JSON.stringify(obj)); }
+function applyDraw(msg){
+  if (seen.has(msg.id)) return;
+  seen.add(msg.id);
+  const card = pile[msg.index % pile.length];
+  show(card, msg.by);
+  log(msg.by + ": " + card[1]);
+}
+$("join").onclick = () => {
+  me = ($("name").value || "Dig").trim();
+  room = ($("room").value || "nat").trim().toLowerCase();
+  if (!window.mqtt){ alert("Netværket til kortene kunne ikke indlæses. Tjek net og genindlæs."); return; }
+  rebuild();
+  $("login").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  const brokers = ["wss://broker.hivemq.com:8884/mqtt","wss://broker.emqx.io:8084/mqtt"];
+  client = mqtt.connect(brokers[0], { clientId:"kort-"+Math.random().toString(16).slice(2), reconnectPeriod:2000, connectTimeout:8000 });
+  client.on("connect", () => {
+    client.subscribe(topic());
+    publish({ type:"join", by:me, id:Math.random().toString(16).slice(2) });
+    $("meta").textContent = "Forbundet · " + pile.length + " kort · rum " + room;
+  });
+  client.on("error", () => { $("meta").textContent = "Forbinder igen…"; });
+  client.on("message", (_, buf) => {
+    let msg; try { msg = JSON.parse(buf.toString()); } catch(e){ return; }
+    if (msg.type==="join"){ players.add(msg.by); log(msg.by + " er i rummet"); $("meta").textContent = players.size + " i rummet · " + room; }
+    if (msg.type==="mode" && msg.mode!==mode){ setMode(msg.mode, false); }
+    if (msg.type==="draw") applyDraw(msg);
+  });
+};
+function setMode(next, announce){
+  mode = next;
+  document.querySelectorAll(".modes button").forEach(b => b.classList.toggle("on", b.dataset.mode===mode));
+  rebuild();
+  $("deck").classList.remove("show");
+  if (announce) publish({ type:"mode", mode, by:me });
+}
+document.querySelectorAll(".modes button").forEach(btn => {
+  btn.onclick = () => setMode(btn.dataset.mode, true);
+});
+$("draw").onclick = () => {
+  if (!pile.length) return;
+  const index = Math.floor(Math.random()*pile.length);
+  const msg = { type:"draw", id:Date.now()+"-"+Math.random().toString(16).slice(2), index, by:me };
+  applyDraw(msg);
+  publish(msg);
+};
+$("copy").onclick = async () => {
+  const t = "Rumkode: " + room;
+  try { await navigator.clipboard.writeText(t); $("meta").textContent = "Kode kopieret"; }
+  catch(e){ $("meta").textContent = t; }
+};
+</script>
+</body>
+</html>
